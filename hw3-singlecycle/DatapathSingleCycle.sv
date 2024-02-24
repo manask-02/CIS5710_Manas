@@ -21,11 +21,27 @@ module RegFile (
     input logic we,
     input logic rst
 );
+  
   localparam int NumRegs = 32;
   logic [`REG_SIZE] regs[NumRegs];
+  integer i;
 
   // TODO: your code here
+  assign regs[0] = 32'd0; // x0 is always zero
+  assign rs1_data = regs[rs1]; // 1st read port
+  assign rs2_data = regs[rs2]; // 2nd read port
 
+  always_ff @(posedge clk) begin
+    if (rst == 1'b1) begin
+      for (i=0; i < NumRegs; i++) begin
+        regs[i] <= 32'd0;
+      end
+    end else begin
+      if ((we==1'b1) && (rd != 5'd0)) begin // if read and write happen at once
+        regs[rd] <= rd_data;
+      end
+    end
+  end
 endmodule
 
 module DatapathSingleCycle (
@@ -88,7 +104,13 @@ module DatapathSingleCycle (
   localparam bit [`OPCODE_SIZE] OpEnviron = 7'b11_100_11;
 
   localparam bit [`OPCODE_SIZE] OpAuipc = 7'b00_101_11;
+
+  // edited: user added
   localparam bit [`OPCODE_SIZE] OpLui = 7'b01_101_11;
+  localparam bit [`OPCODE_SIZE] OpI = 7'b0010011;
+  localparam bit [`OPCODE_SIZE] OpR = 7'b0110011;
+  localparam bit [`OPCODE_SIZE] OpU = 7'b01_101_11;
+  localparam bit [`OPCODE_SIZE] Opecall = 7'b1110011;
 
   wire insn_lui = insn_opcode == OpLui;
   wire insn_auipc = insn_opcode == OpAuipc;
@@ -188,18 +210,196 @@ module DatapathSingleCycle (
 
   logic illegal_insn;
 
+  // extra wires for rs1_data and rs1_data
+  logic [`REG_SIZE] rs1_data_temp;
+  logic [`REG_SIZE] rs2_data_temp;
+  logic we_lui;
+  logic [`REG_SIZE] rd_data;
+  logic [`REG_SIZE]  alu_a, alu_b;
+  logic alu_cin;
+  logic [`REG_SIZE] alu_sum;
+  logic [`REG_SIZE] pc_inc;
+  logic [63:0] mult_res;
+
+  logic branch_taken;
+
+  RegFile rf(.rd(insn_rd), .rd_data(rd_data), .rs1(insn_rs1), .rs1_data(rs1_data_temp), 
+    .rs2(insn_rs2), .rs2_data(rs2_data_temp), .clk(clk), .we(we_lui) , .rst(rst));
+
+  cla alu (.a(alu_a), .b(alu_b), .cin(alu_cin), .sum(alu_sum));
+
   always_comb begin
+  // always_ff @(posedge clk) begin
+  // Using always ff doesn't work where there are subsequent 
+  // instructions to be run. 
+
     illegal_insn = 1'b0;
+    halt = 1'b0;  // edited: most of one riscv tests are failing if this line is removed
+    we_lui = 1'b0;
+    alu_cin = 1'b0;
+
+    // More than 4 cases give me some error.
+    if (insn_bne == 1'b1) begin
+      pc_inc = (rs1_data_temp != rs2_data_temp) ? imm_b_sext: 32'd4;
+    end else if (insn_beq == 1'b1) begin
+      pc_inc = (rs1_data_temp == rs2_data_temp) ? imm_b_sext : 32'd4;
+    end else if (insn_blt == 1'b1) begin
+      pc_inc = ($signed(rs1_data_temp) < $signed(rs2_data_temp)) ? imm_b_sext : 32'd4;
+    end else if (insn_bge == 1'b1) begin
+      pc_inc = ($signed(rs1_data_temp) >= $signed(rs2_data_temp)) ? imm_b_sext : 32'd4;
+    end else if (insn_bltu == 1'b1) begin
+      pc_inc = ($signed(rs1_data_temp) < $unsigned(rs2_data_temp)) ? imm_b_sext : 32'd4;
+    end else if (insn_bgeu == 1'b1) begin
+      pc_inc = ($signed(rs1_data_temp) >= $unsigned(rs2_data_temp)) ? imm_b_sext : 32'd4;
+    end else begin
+      pc_inc = 32'd4;
+    end
+
+    if (insn_ecall == 1'b1) begin
+      halt = 1'b1;
+    end
 
     case (insn_opcode)
-      OpLui: begin
-        // TODO: start here by implementing lui
+      OpU : begin
+        we_lui = 1'b1;
+        if (insn_rd == 5'b0) begin
+          rd_data = 32'b0;
+        end else begin
+          rd_data = {insn_from_imem[31:12], 12'd0};
+        end
       end
+
+      OpI : begin
+        if (insn_addi == 1'b1) begin  // Addi
+          alu_cin = 1'b0;
+          we_lui = 1'b1;
+          alu_a = rs1_data_temp;
+          alu_b = imm_i_sext;
+          rd_data = alu_sum;
+        end 
+        
+        if (insn_slti == 1'b1) begin  //slti have doubt if I have use sign
+          we_lui = 1'b1;
+          rd_data = $signed(rs1_data_temp) < $signed(imm_i_sext) ? 32'b1 : 32'b0;
+        end else if (insn_sltiu == 1'b1) begin
+          we_lui = 1'b1;  // write signal is working properly. if not set properly fails test
+          rd_data = $signed(rs1_data_temp) < $unsigned(imm_i_sext) ? 32'b1 : 32'b0;
+        end
+
+        if (insn_xori == 1'b1) begin  // xori
+          we_lui = 1'b1;
+          rd_data = $signed(rs1_data_temp) ^ imm_i_sext;
+        end
+
+        if (insn_ori == 1'b1) begin  // ori
+          we_lui = 1'b1;
+          rd_data = $signed(rs1_data_temp) | imm_i_sext;
+        end
+
+        if (insn_andi == 1'b1) begin  // andi
+          we_lui = 1'b1;
+          rd_data = $signed(rs1_data_temp) & imm_i_sext;
+        end
+
+        if (insn_slli == 1'b1) begin  // slli not sure about using shamt
+          we_lui = 1'b1;
+          rd_data = rs1_data_temp << imm_shamt;
+        end else if (insn_srli == 1'b1) begin
+          we_lui = 1'b1;
+          rd_data = rs1_data_temp >> imm_shamt;
+        end
+        
+        if (insn_srai == 1'b1) begin
+          we_lui = 1'b1;
+          rd_data = $signed(rs1_data_temp) >>> imm_shamt;
+        end
+
+      end
+
+      OpR : begin
+        if (insn_add == 1'b1) begin
+          alu_cin = 1'b0;
+          we_lui = 1'b1;
+          alu_a = rs1_data_temp;
+          alu_b = rs2_data_temp;
+          rd_data = alu_sum;
+        end
+
+        if (insn_sub == 1'b1) begin
+          //we_lui = 1'b1;
+          //rd_data = rs1_data_temp - rs2_data_temp;
+          alu_cin = 1'b1;
+          we_lui = 1'b1;
+          alu_a = rs1_data_temp;
+          alu_b = ~rs2_data_temp;
+          rd_data = alu_sum;
+        end
+
+        if (insn_sll == 1'b1) begin
+          we_lui = 1'b1;
+          rd_data = rs1_data_temp << rs2_data_temp[4:0];
+        end
+
+        if (insn_slt == 1'b1) begin
+          we_lui = 1'b1;
+          rd_data = $signed(rs1_data_temp) < $signed(rs2_data_temp) ? 32'b1 : 32'b0;
+        end else if (insn_sltu == 1'b1) begin
+          we_lui = 1'b1;
+          rd_data = rs1_data_temp < $unsigned(rs2_data_temp) ? 32'b1 : 32'b0;
+        end
+
+        if (insn_xor == 1'b1) begin
+          we_lui = 1'b1;
+          rd_data = rs1_data_temp ^ rs2_data_temp;
+        end
+
+        if (insn_srl == 1'b1) begin
+          we_lui = 1'b1;
+          rd_data = rs1_data_temp >> (rs2_data_temp[4:0]);
+        end
+        
+        if (insn_sra == 1'b1) begin
+          we_lui = 1'b1;
+          rd_data = $signed(rs1_data_temp) >>> rs2_data_temp[4:0];
+        end
+
+        if (insn_or == 1'b1) begin
+          we_lui = 1'b1;
+          rd_data = rs1_data_temp | rs2_data_temp;
+        end
+
+        if (insn_and == 1'b1) begin
+          we_lui = 1'b1;
+          rd_data = rs1_data_temp & rs2_data_temp;
+        end
+
+        if (insn_mul == 1'b1) begin
+          mult_res = rs1_data_temp * rs2_data_temp;
+          rd_data = mult_res[31:0];
+        end else if (insn_mulh) begin
+          mult_res = $signed(rs1_data_temp) * $signed(rs2_data_temp);
+          rd_data = mult_res[63:32];
+        end else if (insn_mulhsu) begin
+          mult_res = $signed(rs1_data_temp) * $unsigned(rs2_data_temp);
+          rd_data = mult_res[63:32];
+        end else if (insn_mulhu) begin
+          mult_res = $unsigned(rs1_data_temp) * $unsigned(rs2_data_temp);
+          rd_data = mult_res[63:32];
+        end
+
+      end
+
       default: begin
         illegal_insn = 1'b1;
       end
     endcase
+
+    pcNext = pcCurrent + pc_inc;
+
+
   end
+
+  //pcNext = pcCurrent + 32'd4; doesn't work here
 
 endmodule
 
