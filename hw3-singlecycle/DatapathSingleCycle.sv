@@ -347,14 +347,6 @@ always_comb begin
           rddata_ = rs1_data_ << rs2_data_[4:0];
         end
 
-        if (insn_slt == 1'b1) begin
-          welui_ = 1'b1;
-          rddata_ = $signed(rs1_data_) < $signed(rs2_data_) ? 32'b1 : 32'b0;
-        end else if (insn_sltu == 1'b1) begin
-          welui_ = 1'b1;
-          rddata_ = rs1_data_ < $unsigned(rs2_data_) ? 32'b1 : 32'b0;
-        end
-
         if (insn_srl == 1'b1) begin
           welui_ = 1'b1;
           rddata_ = rs1_data_ >> (rs2_data_[4:0]);
@@ -368,6 +360,14 @@ always_comb begin
         if (insn_or == 1'b1) begin
           welui_ = 1'b1;
           rddata_ = rs1_data_ | rs2_data_;
+        end
+
+        if (insn_slt == 1'b1) begin
+          welui_ = 1'b1;
+          rddata_ = $signed(rs1_data_) < $signed(rs2_data_) ? 32'b1 : 32'b0;
+        end else if (insn_sltu == 1'b1) begin
+          welui_ = 1'b1;
+          rddata_ = rs1_data_ < $unsigned(rs2_data_) ? 32'b1 : 32'b0;
         end
 
         if (insn_xor == 1'b1) begin
@@ -491,10 +491,10 @@ the current PC is sent to the imem. In part 2 (starting @posedge clock_mem) we
 read from imem. In part 3 (starting @negedge clock_mem) we read/write memory and
 prepare register/PC updates, which occur at @posedge clock_proc.
 
-        __
- proc: |    |__
-           __
- mem:  _|    |_
+        ____
+ proc: |    |______
+           ____
+ mem:  ___|    |___
 */
 module RiscvProcessor (
     input  wire  clock_proc,
