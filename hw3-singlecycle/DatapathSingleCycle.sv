@@ -31,6 +31,7 @@ module RegFile (
   assign rs1_data = regs[rs1]; // 1st read port
   assign rs2_data = regs[rs2]; // 2nd read port
 
+<<<<<<< HEAD
   always_ff @(posedge clk) begin
     if (rst == 1'b1) begin
       for (i=0; i < NumRegs; i++) begin
@@ -40,6 +41,21 @@ module RegFile (
       if ((we==1'b1) && (rd != 5'd0)) begin // if read and write happen at once
         regs[rd] <= rd_data;
       end
+=======
+  assign regs[0] = 32'd0;
+  assign rs1_data = regs[rs1];
+  assign rs2_data = regs[rs2];
+  always_ff @(posedge clk) begin
+    
+    if(1'b1 == rst) begin
+      for(int i = 1;i < NumRegs; i = i+1) begin
+        regs[i] <= 32'd0; 
+      end
+    end 
+
+    if(we && (|rd) == 1'b1 ) begin
+      regs[rd] <= rd_data;
+>>>>>>> 142ae1ecfdec4f98f31933aece03ff617c7f0fbb
     end
   end
 endmodule
@@ -51,11 +67,13 @@ module DatapathSingleCycle (
     output logic [`REG_SIZE] pc_to_imem,
     input wire [`REG_SIZE] insn_from_imem,
     // addr_to_dmem is a read-write port
-    output wire [`REG_SIZE] addr_to_dmem,
+    output logic [`REG_SIZE] addr_to_dmem,
     input logic [`REG_SIZE] load_data_from_dmem,
-    output wire [`REG_SIZE] store_data_to_dmem,
-    output wire [3:0] store_we_to_dmem
+    output logic [`REG_SIZE] store_data_to_dmem,
+    output logic [3:0] store_we_to_dmem
 );
+
+  logic [31:0] add_bits;
 
   // components of the instruction
   wire [6:0] insn_funct7;
@@ -64,7 +82,19 @@ module DatapathSingleCycle (
   wire [2:0] insn_funct3;
   wire [4:0] insn_rd;
   wire [`OPCODE_SIZE] insn_opcode;
-
+  logic [`REG_SIZE] rs1_data, rs2_data, rd_data;
+  logic we;
+//instance for regfile in datapath
+  RegFile rf(
+    .clk(clk), .rst(rst),  .we(we), .rd(insn_rd), .rd_data(rd_data),
+    .rs1(insn_rs1), .rs2(insn_rs2), .rs1_data(rs1_data),  .rs2_data(rs2_data)
+  );
+  //instance for divider in datapath
+  logic [31:0] dividend, divisor, remainder, quotient;
+  logic is_zero, rs1, rs2;
+  divider_unsigned divu(
+    .i_dividend(dividend), .i_divisor(divisor), .o_remainder(remainder), .o_quotient(quotient)
+  );
   // split R-type instruction - see section 2.2 of RiscV spec
   assign {insn_funct7, insn_rs2, insn_rs1, insn_funct3, insn_rd, insn_opcode} = insn_from_imem;
 
@@ -184,7 +214,7 @@ module DatapathSingleCycle (
   // synthesis translate_on
 
   // program counter
-  logic [`REG_SIZE] pcNext, pcCurrent;
+  logic [`REG_SIZE] pcNext, pcCurrent, pcTemp;
   always @(posedge clk) begin
     if (rst) begin
       pcCurrent <= 32'd0;
@@ -418,16 +448,16 @@ module MemorySingleCycle #(
     // must always be aligned to a 4B boundary
     input wire [`REG_SIZE] pc_to_imem,
 
-    // the value at memory location pc_to_imem
+    // the vadde at memory location pc_to_imem
     output logic [`REG_SIZE] insn_from_imem,
 
     // must always be aligned to a 4B boundary
     input wire [`REG_SIZE] addr_to_dmem,
 
-    // the value at memory location addr_to_dmem
+    // the vadde at memory location addr_to_dmem
     output logic [`REG_SIZE] load_data_from_dmem,
 
-    // the value to be written to addr_to_dmem, controlled by store_we_to_dmem
+    // the vadde to be written to addr_to_dmem, controlled by store_we_to_dmem
     input wire [`REG_SIZE] store_data_to_dmem,
 
     // Each bit determines whether to write the corresponding byte of store_data_to_dmem to memory location addr_to_dmem.
@@ -473,7 +503,7 @@ module MemorySingleCycle #(
       if (store_we_to_dmem[3]) begin
         mem[addr_to_dmem[AddrMsb:AddrLsb]][31:24] <= store_data_to_dmem[31:24];
       end
-      // dmem is "read-first": read returns value before the write
+      // dmem is "read-first": read returns vadde before the write
       load_data_from_dmem <= mem[{addr_to_dmem[AddrMsb:AddrLsb]}];
     end
   end
@@ -499,7 +529,7 @@ module RiscvProcessor (
     output logic halt
 );
 
-  wire [`REG_SIZE] pc_to_imem, insn_from_imem, mem_data_addr, mem_data_loaded_value, mem_data_to_write;
+  wire [`REG_SIZE] pc_to_imem, insn_from_imem, mem_data_addr, mem_data_loaded_vadde, mem_data_to_write;
   wire [3:0] mem_data_we;
 
   MemorySingleCycle #(
@@ -512,7 +542,7 @@ module RiscvProcessor (
       .insn_from_imem(insn_from_imem),
       // dmem is read-write
       .addr_to_dmem(mem_data_addr),
-      .load_data_from_dmem(mem_data_loaded_value),
+      .load_data_from_dmem(mem_data_loaded_vadde),
       .store_data_to_dmem (mem_data_to_write),
       .store_we_to_dmem  (mem_data_we)
   );
@@ -525,7 +555,7 @@ module RiscvProcessor (
       .addr_to_dmem(mem_data_addr),
       .store_data_to_dmem(mem_data_to_write),
       .store_we_to_dmem(mem_data_we),
-      .load_data_from_dmem(mem_data_loaded_value),
+      .load_data_from_dmem(mem_data_loaded_vadde),
       .halt(halt)
   );
 
